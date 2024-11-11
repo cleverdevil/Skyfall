@@ -1,0 +1,8 @@
+__pycache__
+application
+build
+dist
+reinvent-game-pie8aiKu
+leaderboard.db
+.DS_Store
+.venv
