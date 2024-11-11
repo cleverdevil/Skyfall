@@ -16,7 +16,7 @@ maintainers = [
 description = "Skyfall: a simple game"
 readme = "README.md"
 license = {file = "LICENSE"}
-keywords = ["pygame"],
+keywords = ["pygame"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python"
@@ -26,3 +26,6 @@ classifiers = [
 Homepage = "https://missioncloud.com"
 Repository = "https://github.com/cleverdevil/Skyfall.git"
 "Bug Tracker" = "https://github.com/cleverdevil/Skyfall/issues"
+
+[tool.setuptools]
+py-modules=["main", "leaderboard"]
