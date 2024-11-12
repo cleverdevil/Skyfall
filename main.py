@@ -1,17 +1,16 @@
-# TODO:
-# - Leaderboard report for mortals
-
-import asyncio
-import pygame
 import os
-import random
-import sys
 import re
+import sys
+import random
+import asyncio
+
 from datetime import datetime
+
+import pygame
 
 BROWSER = False
 
-# if running in browser as wasm, fake out the leaderboard
+# If running in browser as wasm, fake out the leaderboard
 if sys.platform == "emscripten":
     BROWSER = True
 
@@ -43,7 +42,7 @@ else:
 
 # Constants
 SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 1250  # 1250
+SCREEN_HEIGHT = 1250
 PLAYER_SIZE = 100
 HELICOPTER_SIZE = (100, 50)
 INITIAL_OBSTACLE_SPEED = 200
@@ -72,7 +71,7 @@ COLORS = {
 }
 
 
-# Fix joystick initialization failure by monkeypatch
+# Fix joystick initialization failure by monkeypatching pygame. I feel dirty.
 def _fake_init(*a, **k):
     pass
 
@@ -80,8 +79,8 @@ def _fake_init(*a, **k):
 pygame.joystick.init = _fake_init
 
 
-# load resources from disk
-def load_resource(path):
+# Load resources from disk in a way compatible with PyInstaller and Pygbag
+def resource(path):
     if BROWSER:
         return path
     base_path = getattr(sys, "_MEIPASS", os.path.abspath("."))
@@ -89,40 +88,28 @@ def load_resource(path):
     return path
 
 
-# Initialize Pygame and fonts
+# Initialize pygame
 pygame.init()
-pygame.font.init()  # Initialize the font module
+pygame.font.init()
 screen = pygame.display.set_mode(
     (SCREEN_WIDTH, SCREEN_HEIGHT), flags=pygame.SCALED, vsync=1
 )
 pygame.display.set_caption("Skyfall")
 clock = pygame.time.Clock()
 
-# Load custom fonts from the 'fonts' folder
-title_font = pygame.font.Font(load_resource("fonts/title.ttf"), 144)
-leaderboard_title_font = pygame.font.Font(
-    load_resource("fonts/title.ttf"), 50
-)  # 50% size
-hud_font = pygame.font.Font(load_resource("fonts/common.otf"), 20)
-common_font = pygame.font.Font(load_resource("fonts/common.otf"), COMMON_FONT_SIZE)
+# Load custom fonts
+title_font = pygame.font.Font(resource("fonts/title.ttf"), 144)
+leaderboard_title_font = pygame.font.Font(resource("fonts/title.ttf"), 50)
+hud_font = pygame.font.Font(resource("fonts/common.otf"), 20)
+common_font = pygame.font.Font(resource("fonts/common.otf"), COMMON_FONT_SIZE)
 small_common_font = pygame.font.Font(
-    load_resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.75)
-)  # Reduced by 25%
+    resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.75)
+)
 
-# Load images from the 'images' folder
-player_image = pygame.image.load(load_resource("images/skydiver.png")).convert_alpha()
-mission_image = pygame.image.load(
-    load_resource("images/mission.png")
-).convert_alpha()  # Logo
-dynamic_o_image = pygame.image.load(
-    load_resource("images/dynamic-o.png")
-).convert_alpha()  # Brand symbol
-
-# Title Screen Animation Variables
-title_skydiver_pos = SCREEN_WIDTH // 2
-title_skydiver_direction = 1
-blink_timer = 0
-MAX_SKYDIVER_MOVEMENT = 100
+# Load images
+player_image = pygame.image.load(resource("images/skydiver.png")).convert_alpha()
+mission_image = pygame.image.load(resource("images/mission.png")).convert_alpha()
+dynamic_o_image = pygame.image.load(resource("images/dynamic-o.png")).convert_alpha()
 
 
 # Utility function to handle text rendering, centered
@@ -183,6 +170,7 @@ def display_leaderboard():
     leaderboard_start_y = SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 160
     line_height = 35
 
+    # Draw the leaderboard itself
     for i, (name, score, timestamp) in enumerate(top_scores):
         if not score:
             text = small_common_font.render(name, True, COLORS["WHITE"])
@@ -206,7 +194,7 @@ def display_leaderboard():
         screen.blit(score_text, (650, leaderboard_start_y + i * line_height))
 
 
-# Cloud class for background clouds (no point values)
+# Cloud class for background clouds displayed on title screen
 class BackgroundCloud:
     def __init__(self, cloud_type, speed):
         cloud_images = [
@@ -227,11 +215,10 @@ class BackgroundCloud:
         screen.blit(self.image, self.rect)
 
 
-# Title Screen
+# Title screen
 async def title_screen():
-    global title_skydiver_pos, title_skydiver_direction, blink_timer
-
-    # Reset skydiver animation variables on every title screen display
+    # Calculate initial skydiver position
+    MAX_SKYDIVER_MOVEMENT = 100
     title_skydiver_pos = SCREEN_WIDTH // 2
     title_skydiver_direction = 1
     blink_timer = 0
@@ -239,13 +226,13 @@ async def title_screen():
     # Create list to hold background clouds
     background_clouds = []
 
-    # Populate initial clouds
-    for _ in range(5):  # Start with 5 clouds
+    # Populate five clouds of random types moving at random speeds
+    for _ in range(5):
         cloud_type = random.randint(0, 2)
-        cloud_speed = random.uniform(50, 150)  # Slower clouds
+        cloud_speed = random.uniform(50, 150)
         background_clouds.append(BackgroundCloud(cloud_type, cloud_speed))
 
-    # Scale down the mission.png image by a further 35% (to a total of 45%)
+    # Scale the Mission logo to fit the screen
     mission_scaled = pygame.transform.scale(
         mission_image,
         (
@@ -254,6 +241,7 @@ async def title_screen():
         ),
     )
 
+    # Title screen main loop
     running = True
     while running:
         delta_time = clock.tick(60) / 1000
@@ -263,6 +251,7 @@ async def title_screen():
         for cloud in background_clouds[:]:
             cloud.move(delta_time)
             cloud.draw()
+
             # Remove cloud once it goes off-screen and add a new one
             if cloud.rect.y + cloud.rect.height < 0:
                 background_clouds.remove(cloud)
@@ -287,6 +276,7 @@ async def title_screen():
         ) or title_skydiver_pos > (SCREEN_WIDTH // 2 + MAX_SKYDIVER_MOVEMENT):
             title_skydiver_direction *= -1
 
+        # Display blinking text that tells the player how to start the game
         blink_timer += delta_time * 1000
         if blink_timer >= TITLE_BLINK_INTERVAL:
             blink_timer = 0
@@ -300,16 +290,14 @@ async def title_screen():
                 550,
             )
 
-        # Show "BROUGHT TO YOU BY" text with reduced font size
+        # Display a branded message about Mission, including our logo
         render_text_centered(
             "BROUGHT TO YOU BY",
-            small_common_font,  # Smaller font size
+            small_common_font,
             COLORS["BLACK"],
             SCREEN_WIDTH // 2,
             SCREEN_HEIGHT - 180,
         )
-
-        # Display scaled mission logo
         screen.blit(
             mission_scaled,
             (
@@ -321,6 +309,7 @@ async def title_screen():
         # Display leaderboard
         display_leaderboard()
 
+        # Update the display and yield
         pygame.display.update()
         await asyncio.sleep(0)
 
@@ -329,14 +318,19 @@ async def title_screen():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+
+            # If the user presses 'Return', go to session info screen
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
                 await session_info_screen()
                 return
+
+            # If the user is on mobile and taps the screen, go to session into screen
             if BROWSER and event.type == pygame.FINGERUP:
                 await session_info_screen()
                 return
 
 
+# Session info screen, which captures name and email of the player
 async def session_info_screen():
     name = ""
     email = ""
@@ -345,27 +339,33 @@ async def session_info_screen():
     error_message = ""
     blink_timer = 0
     cursor_visible = True
-    input_box_width = 500  # Increased input box width
-    input_box_height = 60  # Increased input box height
+    input_box_width = 500
+    input_box_height = 60
 
+    # Don't bother collecting information if running in the browser
     if BROWSER:
         await main_game(name, email)
 
-    # Smaller font for input box text
-    input_font = pygame.font.Font("fonts/common.otf", int(COMMON_FONT_SIZE * 0.75))
+    # Load fonts
+    input_font = pygame.font.Font(
+        resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.75)
+    )
+    error_font = pygame.font.Font(
+        resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.6)
+    )
 
-    # Smaller font for error messages
-    error_font = pygame.font.Font("fonts/common.otf", int(COMMON_FONT_SIZE * 0.6))
-
+    # Session info screen main loop
     while True:
         screen.fill(COLORS["SKY_BLUE"])
 
-        delta_time = clock.tick(60) / 1000  # For the blinking cursor timer
+        # Blink a cursor in our input boxes
+        delta_time = clock.tick(60) / 1000
         blink_timer += delta_time * 1000
-        if blink_timer >= 500:  # Blink every 500ms
+        if blink_timer >= 500:
             blink_timer = 0
             cursor_visible = not cursor_visible
 
+        # Display an editable text field for the player name
         if is_typing_name:
             render_text_centered(
                 "Enter your name:",
@@ -380,9 +380,7 @@ async def session_info_screen():
                 round(input_box_width),
                 round(input_box_height),
             )
-            pygame.draw.rect(
-                screen, COLORS["BLACK"], input_rect, 1
-            )  # 1-pixel black border
+            pygame.draw.rect(screen, COLORS["BLACK"], input_rect, 1)
             name_text = input_font.render(name, True, COLORS["BLACK"])
             screen.blit(name_text, (round(input_rect.x + 10), round(input_rect.y + 5)))
 
@@ -396,6 +394,7 @@ async def session_info_screen():
                     2,
                 )
 
+        # Display an editable text field for the player email address
         elif is_typing_email:
             render_text_centered(
                 "Enter your email:",
@@ -428,7 +427,7 @@ async def session_info_screen():
                     2,
                 )
 
-        # Show any error messages
+        # If validation fails, gracefully tell the user why
         if error_message:
             lines = error_message.split("\n")  # For multi-line error messages
             for i, line in enumerate(lines):
@@ -440,9 +439,11 @@ async def session_info_screen():
                     SCREEN_HEIGHT // 3 + 120 + i * 30,
                 )
 
+        # Update display and yield
         pygame.display.update()
         await asyncio.sleep(0)
 
+        # Event loop
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -480,7 +481,7 @@ async def session_info_screen():
             await asyncio.sleep(0)
 
 
-# Main Game Loop with Lives and Scores
+# Main game loop
 async def main_game(name, email):
     scores = []
     lives = LIVES
@@ -491,25 +492,19 @@ async def main_game(name, email):
     # Log the start of a new session
     session_start = datetime.now()
 
+    # Give the user three "lives", recording the scores for later, and displaying an
+    # inter-round screen to summarize the "life"
     while lives > 0:
-        score, time_survived, cloud_points, max_speed = await play_game(
-            lives
-        )  # Pass the current number of lives
+        score, time_survived, cloud_points, max_speed = await play_game(lives)
         await inter_round_screen(score, time_survived, cloud_points, max_speed)
         scores.append(score)
-        lives -= 1  # Decrease lives after each game
+        lives -= 1
 
-    # Ensure scores has exactly three elements, filling in with 0 if necessary
-    while len(scores) < 3:
-        scores.append(0)
-
-    # Log the session at the end, using a list of scores
+    # Log the session at the end
     session_end = datetime.now()
+    leaderboard.log_session(email, session_start, session_end, scores)
 
-    leaderboard.log_session(
-        email, session_start, session_end, scores
-    )  # Pass the scores list
-
+    # Display an end of game screen before returning to the title screen
     await end_of_round_screen(scores, email)
 
 
@@ -569,26 +564,28 @@ async def inter_round_screen(score, time_survived, cloud_points, max_speed):
                 running = False
 
 
-# End of round screen with leaderboard, blinking session scores, and zooming high score image
+# End of round screen with leaderboard, session scores, and high score image
 async def end_of_round_screen(scores, email):
     running = True
-    best_score = max(scores)  # The player's best score in this round
+    best_score = max(scores)
     blink_timer = 0
-    blink_on = True  # To control blinking effect
-    BLINK_INTERVAL = 500  # 500 ms interval
+    blink_on = True
+    BLINK_INTERVAL = 500
 
-    # Fetch the top 8 scores including the player's new score
+    # Fetch the top 8 scores including the player's latest scores
     top_scores = leaderboard.get_leaderboard(count=8)
 
     # Load the high score image
     highscore_image = pygame.image.load("images/highscore.png").convert_alpha()
 
+    # Main loop
     while running:
-        delta_time = clock.tick(60) / 1000  # Update the time for blinking effect
+        # Blinking text
+        delta_time = clock.tick(60) / 1000
         blink_timer += delta_time * 1000
         if blink_timer >= BLINK_INTERVAL:
             blink_timer = 0
-            blink_on = not blink_on  # Toggle the blinking state
+            blink_on = not blink_on
 
         screen.fill(COLORS["SKY_BLUE"])
 
@@ -718,9 +715,11 @@ async def end_of_round_screen(scores, email):
 
         display_brand_symbol()
 
+        # Update display and yield
         pygame.display.update()
         await asyncio.sleep(0)
 
+        # Event loop
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -733,10 +732,11 @@ async def end_of_round_screen(scores, email):
                 return
 
 
-# Game Logic for each life
+# Game logic for each "life" in a session
 async def play_game(lives):
+    # Track player, o
     player = Player()
-    obstacles = []
+    clouds = []
     helicopters = []
     total_cloud_points = 0
     time_survived = 0
@@ -801,16 +801,16 @@ async def play_game(lives):
         # Spawn clouds and helicopters
         if random.random() < 0.02:
             cloud_type = random.randint(0, 2)
-            obstacles.append(Cloud(cloud_type, obstacle_speed))
+            clouds.append(Cloud(cloud_type, obstacle_speed))
         if random.random() < 0.01:
             helicopters.append(Helicopter(obstacle_speed))
 
-        # Move and check collisions for obstacles
-        for obstacle in obstacles[:]:
-            obstacle.move(delta_time)
-            if isinstance(obstacle, Cloud) and player.rect.colliderect(obstacle.rect):
-                total_cloud_points += obstacle.point_value
-                obstacles.remove(obstacle)
+        # Move and check collisions for clouds
+        for cloud in clouds[:]:
+            cloud.move(delta_time)
+            if player.rect.colliderect(cloud.rect):
+                total_cloud_points += cloud.point_value
+                clouds.remove(cloud)
 
         # Handle helicopter collisions
         for helicopter in helicopters[:]:
@@ -824,8 +824,8 @@ async def play_game(lives):
         # Redraw screen
         screen.fill(COLORS["SKY_BLUE"])
         player.draw()
-        for obstacle in obstacles:
-            obstacle.draw()
+        for cloud in clouds:
+            cloud.draw()
         for helicopter in helicopters:
             helicopter.draw()
 
@@ -955,7 +955,7 @@ class Cloud:
         screen.blit(self.image, self.rect)
         # Draw the point value on top of the cloud using "fonts/common.otf" font
         font_size = self.rect.height  # Set font size proportional to cloud height
-        font = pygame.font.Font("fonts/common.otf", font_size)
+        font = pygame.font.Font(resource("fonts/common.otf"), font_size)
         point_text = font.render(str(self.point_value), True, self.text_color)
         point_rect = point_text.get_rect(center=self.rect.center)
         screen.blit(point_text, point_rect)
