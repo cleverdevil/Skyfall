@@ -14,6 +14,9 @@ BROWSER = True if sys.platform == "emscripten" else False
 if BROWSER:
 
     class LeaderboardMock:
+        def is_high_score(self, score):
+            pass
+
         def add_player(self, email, name):
             pass
 
@@ -1012,6 +1015,10 @@ class EndOfRoundView(View):
         Handle events as they come in from pyevent, returning to the title screen
         when appropriate.
         """
+
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
             await game.show_title()
