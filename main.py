@@ -133,67 +133,6 @@ def display_brand_symbol():
     screen.blit(dynamic_o_scaled, (symbol_x, symbol_y))
 
 
-# Helper function to validate email format using regex
-def is_valid_email(email):
-    pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
-    return re.match(pattern, email)
-
-
-# Display leaderboard on the title screen
-def display_leaderboard():
-    # Fetch top 10 scores from the leaderboard
-    top_scores = leaderboard.get_leaderboard(count=8)
-
-    # Create a semi-transparent black box
-    leaderboard_box = pygame.Surface((LEADERBOARD_BOX_WIDTH, LEADERBOARD_BOX_HEIGHT))
-    leaderboard_box.set_alpha(LEADERBOARD_BOX_OPACITY)
-    leaderboard_box.fill(COLORS["BLACK"])
-    screen.blit(
-        leaderboard_box,
-        (
-            (SCREEN_WIDTH - LEADERBOARD_BOX_WIDTH) // 2,
-            SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 250,
-        ),
-    )
-
-    # Draw title
-    message = "Play at AWS re:Invent to win!" if BROWSER else "High Scores"
-    render_text_centered(
-        message,
-        leaderboard_title_font,
-        COLORS["WHITE"],
-        SCREEN_WIDTH // 2,
-        SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 200,
-    )
-
-    # Define leaderboard positions
-    leaderboard_start_y = SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 160
-    line_height = 35
-
-    # Draw the leaderboard itself
-    for i, (name, score, timestamp) in enumerate(top_scores):
-        if not score:
-            text = small_common_font.render(name, True, COLORS["WHITE"])
-            screen.blit(text, (100, leaderboard_start_y + i * line_height))
-            continue
-
-        rank = f"{i + 1}."
-        player_name = name if len(name) < 25 else name[:23] + "..."
-        score_str = str(int(score))
-
-        # Right-align rank numbers
-        rank_text = small_common_font.render(rank, True, COLORS["WHITE"])
-        screen.blit(rank_text, (100, leaderboard_start_y + i * line_height))
-
-        # Left-align player names
-        name_text = small_common_font.render(player_name, True, COLORS["WHITE"])
-        screen.blit(name_text, (160, leaderboard_start_y + i * line_height))
-
-        # Left-align scores
-        score_text = small_common_font.render(score_str, True, COLORS["WHITE"])
-        screen.blit(score_text, (650, leaderboard_start_y + i * line_height))
-
-
 # Cloud class for background clouds displayed on title screen
 class BackgroundCloud:
     def __init__(self, cloud_type, speed):
@@ -215,74 +154,139 @@ class BackgroundCloud:
         screen.blit(self.image, self.rect)
 
 
-# Title screen
-async def title_screen():
-    # Calculate initial skydiver position
-    MAX_SKYDIVER_MOVEMENT = 100
-    title_skydiver_pos = SCREEN_WIDTH // 2
-    title_skydiver_direction = 1
-    blink_timer = 0
+class View:
 
-    # Create list to hold background clouds
-    background_clouds = []
+    def __init__(self):
+        self.screen = screen
 
-    # Populate five clouds of random types moving at random speeds
-    for _ in range(5):
-        cloud_type = random.randint(0, 2)
-        cloud_speed = random.uniform(50, 150)
-        background_clouds.append(BackgroundCloud(cloud_type, cloud_speed))
+    async def render_text(self, text, font, color, center_x, center_y):
+        text_surface = font.render(text, True, color)
+        text_rect = text_surface.get_rect(center=(center_x, center_y))
+        self.screen.blit(text_surface, text_rect)
 
-    # Scale the Mission logo to fit the screen
-    mission_scaled = pygame.transform.scale(
-        mission_image,
-        (
-            int(mission_image.get_width() * 0.45),
-            int(mission_image.get_height() * 0.45),
-        ),
-    )
+    async def draw(self):
+        raise NotImplementedError()
 
-    # Title screen main loop
-    running = True
-    while running:
-        delta_time = clock.tick(60) / 1000
-        screen.fill(COLORS["SKY_BLUE"])
+    async def handle_event(self, event):
+        raise NotImplementedError()
 
-        # Move and draw background clouds
-        for cloud in background_clouds[:]:
-            cloud.move(delta_time)
-            cloud.draw()
+    async def stop(self):
+        self.running = False
 
-            # Remove cloud once it goes off-screen and add a new one
-            if cloud.rect.y + cloud.rect.height < 0:
-                background_clouds.remove(cloud)
-                cloud_type = random.randint(0, 2)
-                cloud_speed = random.uniform(50, 150)
-                background_clouds.append(BackgroundCloud(cloud_type, cloud_speed))
+    async def run(self):
+        self.running = True
+        while self.running:
+            # Draw the screen
+            await self.draw()
 
-        # Display title and animate skydiver
-        render_text_centered(
+            pygame.display.update()
+            await asyncio.sleep(0)
+
+            # handle events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+
+                await self.handle_event(event)
+                pygame.display.update()
+                clock.tick()
+                await asyncio.sleep(0)
+
+        return self
+
+
+class TitleView(View):
+
+    def __init__(self):
+        super().__init__()
+
+        self._max_skydiver_movement = 100
+        self._skydiver_pos = SCREEN_WIDTH // 2
+        self._skydiver_direction = 1
+        self._blink_timer = 0
+        self._delta_time = clock.tick(60) / 1000
+        self._populate_clouds()
+
+    async def handle_event(self, event):
+        # If the user presses 'Return', go to session info screen
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+            await SessionInfoView().run()
+
+        # If the user is on mobile and taps the screen, go to session into screen
+        elif BROWSER and event.type == pygame.FINGERUP:
+            await SessionInfoView().run()
+            return
+
+    async def draw(self):
+        self.screen.fill(COLORS["SKY_BLUE"])
+
+        # Draw clouds
+        await self._draw_clouds()
+
+        # Draw leaderboard
+        await self._draw_leaderboard()
+
+        # Draw title
+        await self.render_text(
             "SKYFALL", title_font, COLORS["WHITE"], SCREEN_WIDTH // 2, 200
         )
-        screen.blit(
-            player_image, (round(title_skydiver_pos - PLAYER_SIZE // 2), round(350))
+
+        # Draw skydiver
+        await self._draw_skydiver()
+
+        # Draw message
+        await self._draw_message()
+
+        # Display a branded message about Mission, including our logo
+        self._mission_scaled = pygame.transform.scale(
+            mission_image,
+            (
+                int(mission_image.get_width() * 0.45),
+                int(mission_image.get_height() * 0.45),
+            ),
+        )
+
+        await self.render_text(
+            "BROUGHT TO YOU BY",
+            small_common_font,
+            COLORS["BLACK"],
+            SCREEN_WIDTH // 2,
+            SCREEN_HEIGHT - 180,
+        )
+        self.screen.blit(
+            self._mission_scaled,
+            (
+                round((SCREEN_WIDTH - self._mission_scaled.get_width()) // 2),
+                round(SCREEN_HEIGHT - 60 - self._mission_scaled.get_height()),
+            ),
+        )
+
+    async def _draw_skydiver(self):
+        # Draw the skydiver
+        self.screen.blit(
+            player_image,
+            (round(self._skydiver_pos - PLAYER_SIZE // 2), round(350)),
         )
 
         # Animate skydiver position
-        title_skydiver_pos += (
-            SKYDIVER_MOVE_SPEED * title_skydiver_direction * delta_time
+        self._skydiver_pos += (
+            SKYDIVER_MOVE_SPEED * self._skydiver_direction * self._delta_time
         )
-        if title_skydiver_pos < (
-            SCREEN_WIDTH // 2 - MAX_SKYDIVER_MOVEMENT
-        ) or title_skydiver_pos > (SCREEN_WIDTH // 2 + MAX_SKYDIVER_MOVEMENT):
-            title_skydiver_direction *= -1
+        if self._skydiver_pos < (
+            SCREEN_WIDTH // 2 - self._max_skydiver_movement
+        ) or self._skydiver_pos > (SCREEN_WIDTH // 2 + self._max_skydiver_movement):
+            self._skydiver_direction *= -1
 
+    async def _draw_message(self):
         # Display blinking text that tells the player how to start the game
-        blink_timer += delta_time * 1000
-        if blink_timer >= TITLE_BLINK_INTERVAL:
-            blink_timer = 0
-        if blink_timer < TITLE_BLINK_INTERVAL / 2:
+        self._blink_timer += self._delta_time * 1000
+        if self._blink_timer >= TITLE_BLINK_INTERVAL:
+            self._blink_timer = 0
+
+        if self._blink_timer < TITLE_BLINK_INTERVAL / 2:
             message = "Press ENTER or TOUCH to play"
-            render_text_centered(
+            await self.render_text(
                 message,
                 common_font,
                 COLORS["DARK_RED"],
@@ -290,199 +294,227 @@ async def title_screen():
                 550,
             )
 
-        # Display a branded message about Mission, including our logo
-        render_text_centered(
-            "BROUGHT TO YOU BY",
-            small_common_font,
-            COLORS["BLACK"],
-            SCREEN_WIDTH // 2,
-            SCREEN_HEIGHT - 180,
+    def _populate_clouds(self):
+        # Create list to hold background clouds
+        self._background_clouds = []
+
+        # Populate five clouds of random types moving at random speeds
+        for _ in range(5):
+            cloud_type = random.randint(0, 2)
+            cloud_speed = random.uniform(50, 150)
+            self._background_clouds.append(BackgroundCloud(cloud_type, cloud_speed))
+
+    async def _draw_clouds(self):
+        # Move and draw background clouds
+        for cloud in self._background_clouds[:]:
+            cloud.move(self._delta_time)
+            cloud.draw()
+
+            # Remove cloud once it goes off-screen and add a new one
+            if cloud.rect.y + cloud.rect.height < 0:
+                self._background_clouds.remove(cloud)
+                cloud_type = random.randint(0, 2)
+                cloud_speed = random.uniform(50, 150)
+                self._background_clouds.append(
+                    BackgroundCloud(cloud_type, cloud_speed)
+                )
+
+    async def _draw_leaderboard(self):
+        # Fetch top 10 scores from the leaderboard
+        top_scores = leaderboard.get_leaderboard(count=8)
+
+        # Create a semi-transparent black box
+        leaderboard_box = pygame.Surface(
+            (LEADERBOARD_BOX_WIDTH, LEADERBOARD_BOX_HEIGHT)
         )
-        screen.blit(
-            mission_scaled,
+        leaderboard_box.set_alpha(LEADERBOARD_BOX_OPACITY)
+        leaderboard_box.fill(COLORS["BLACK"])
+        self.screen.blit(
+            leaderboard_box,
             (
-                round((SCREEN_WIDTH - mission_scaled.get_width()) // 2),
-                round(SCREEN_HEIGHT - 60 - mission_scaled.get_height()),
+                (SCREEN_WIDTH - LEADERBOARD_BOX_WIDTH) // 2,
+                SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 250,
             ),
         )
 
-        # Display leaderboard
-        display_leaderboard()
+        # Draw title
+        message = "Play at AWS re:Invent to win!" if BROWSER else "High Scores"
+        await self.render_text(
+            message,
+            leaderboard_title_font,
+            COLORS["WHITE"],
+            SCREEN_WIDTH // 2,
+            SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 200,
+        )
 
-        # Update the display and yield
-        pygame.display.update()
-        await asyncio.sleep(0)
+        # Define leaderboard positions
+        leaderboard_start_y = SCREEN_HEIGHT - LEADERBOARD_BOX_HEIGHT - 160
+        line_height = 35
 
-        # Handle input events
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
+        # Draw the leaderboard itself
+        for i, (name, score, _) in enumerate(top_scores):
+            if not score:
+                text = small_common_font.render(name, True, COLORS["WHITE"])
+                self.screen.blit(text, (100, leaderboard_start_y + i * line_height))
+                continue
 
-            # If the user presses 'Return', go to session info screen
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                await session_info_screen()
-                return
+            rank = f"{i + 1}."
+            player_name = name if len(name) < 25 else name[:23] + "..."
+            score_str = str(int(score))
 
-            # If the user is on mobile and taps the screen, go to session into screen
-            if BROWSER and event.type == pygame.FINGERUP:
-                await session_info_screen()
-                return
+            # Right-align rank numbers
+            rank_text = small_common_font.render(rank, True, COLORS["WHITE"])
+            self.screen.blit(rank_text, (100, leaderboard_start_y + i * line_height))
+
+            # Left-align player names
+            name_text = small_common_font.render(player_name, True, COLORS["WHITE"])
+            self.screen.blit(name_text, (160, leaderboard_start_y + i * line_height))
+
+            # Left-align scores
+            score_text = small_common_font.render(score_str, True, COLORS["WHITE"])
+            self.screen.blit(score_text, (650, leaderboard_start_y + i * line_height))
 
 
-# Session info screen, which captures name and email of the player
-async def session_info_screen():
-    name = ""
-    email = ""
-    is_typing_name = True
-    is_typing_email = False
-    error_message = ""
-    blink_timer = 0
-    cursor_visible = True
-    input_box_width = 500
-    input_box_height = 60
+class SessionInfoView(View):
 
-    # Don't bother collecting information if running in the browser
-    if BROWSER:
-        await main_game(name, email)
+    def __init__(self):
+        super().__init__()
+        self._name = ""
+        self._email = ""
+        self._is_typing_name = True
+        self._is_typing_email = False
+        self._error_message = ""
+        self._blink_timer = 0
+        self._cursor_visible = True
+        self._input_box_width = 500
+        self._input_box_height = 60
+        self._load_fonts()
 
-    # Load fonts
-    input_font = pygame.font.Font(
-        resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.75)
-    )
-    error_font = pygame.font.Font(
-        resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.6)
-    )
+    async def _set_cursor_timing(self):
+        self._delta_time = clock.tick(60) / 1000
+        self._blink_timer += self._delta_time * 1000
+        if self._blink_timer >= 500:
+            self._blink_timer = 0
+            self._cursor_visible = not self._cursor_visible
 
-    # Session info screen main loop
-    while True:
-        screen.fill(COLORS["SKY_BLUE"])
+    async def _draw_input(self, message, target):
+        await self.render_text(
+            message,
+            common_font,
+            COLORS["BLACK"],
+            SCREEN_WIDTH // 2,
+            SCREEN_HEIGHT // 3,
+        )
 
-        # Blink a cursor in our input boxes
-        delta_time = clock.tick(60) / 1000
-        blink_timer += delta_time * 1000
-        if blink_timer >= 500:
-            blink_timer = 0
-            cursor_visible = not cursor_visible
+        input_rect = pygame.Rect(
+            round((SCREEN_WIDTH - self._input_box_width) // 2),
+            round(SCREEN_HEIGHT // 3 + 50),
+            round(self._input_box_width),
+            round(self._input_box_height),
+        )
+        pygame.draw.rect(self.screen, COLORS["BLACK"], input_rect, 1)
+
+        text = self._input_font.render(target, True, COLORS["BLACK"])
+        self.screen.blit(text, (round(input_rect.x + 10), round(input_rect.y + 5)))
+
+        if self._cursor_visible:
+            cursor_x = round(input_rect.x + 10 + text.get_width() + 2)
+            pygame.draw.line(
+                self.screen,
+                COLORS["BLACK"],
+                (cursor_x, round(input_rect.y + 5)),
+                (cursor_x, round(input_rect.y + 45)),
+                2,
+            )
+
+    async def _draw_name_input(self):
+        await self._draw_input("Enter your name:", self._name)
+
+    async def _draw_email_input(self):
+        await self._draw_input("Enter your email:", self._email)
+
+    async def _handle_validation_errors(self):
+        lines = self._error_message.split("\n")
+        for i, line in enumerate(lines):
+            await self.render_text(
+                line,
+                self._error_font,
+                COLORS["DARK_RED"],
+                SCREEN_WIDTH // 2,
+                SCREEN_HEIGHT // 3 + 120 + i * 30,
+            )
+
+    async def draw(self):
+        # Don't bother collecting information if running in the browser
+        if BROWSER:
+            await main_game()
+            return
+
+        self.screen.fill(COLORS["SKY_BLUE"])
+
+        # Prepare to display a blinking cursor in input fields
+        await self._set_cursor_timing()
 
         # Display an editable text field for the player name
-        if is_typing_name:
-            render_text_centered(
-                "Enter your name:",
-                common_font,
-                COLORS["BLACK"],
-                SCREEN_WIDTH // 2,
-                SCREEN_HEIGHT // 3,
-            )
-            input_rect = pygame.Rect(
-                round((SCREEN_WIDTH - input_box_width) // 2),
-                round(SCREEN_HEIGHT // 3 + 50),
-                round(input_box_width),
-                round(input_box_height),
-            )
-            pygame.draw.rect(screen, COLORS["BLACK"], input_rect, 1)
-            name_text = input_font.render(name, True, COLORS["BLACK"])
-            screen.blit(name_text, (round(input_rect.x + 10), round(input_rect.y + 5)))
-
-            if cursor_visible:
-                cursor_x = round(input_rect.x + 10 + name_text.get_width() + 2)
-                pygame.draw.line(
-                    screen,
-                    COLORS["BLACK"],
-                    (cursor_x, round(input_rect.y + 5)),
-                    (cursor_x, round(input_rect.y + 45)),
-                    2,
-                )
+        if self._is_typing_name:
+            await self._draw_name_input()
 
         # Display an editable text field for the player email address
-        elif is_typing_email:
-            render_text_centered(
-                "Enter your email:",
-                common_font,
-                COLORS["BLACK"],
-                SCREEN_WIDTH // 2,
-                SCREEN_HEIGHT // 3,
-            )
-            input_rect = pygame.Rect(
-                round((SCREEN_WIDTH - input_box_width) // 2),
-                round(SCREEN_HEIGHT // 3 + 50),
-                round(input_box_width),
-                round(input_box_height),
-            )
-            pygame.draw.rect(
-                screen, COLORS["BLACK"], input_rect, 1
-            )  # 1-pixel black border
-            email_text = input_font.render(email, True, COLORS["BLACK"])
-            screen.blit(
-                email_text, (round(input_rect.x + 10), round(input_rect.y + 5))
-            )
-
-            if cursor_visible:
-                cursor_x = round(input_rect.x + 10 + email_text.get_width() + 2)
-                pygame.draw.line(
-                    screen,
-                    COLORS["BLACK"],
-                    (cursor_x, round(input_rect.y + 5)),
-                    (cursor_x, round(input_rect.y + 45)),
-                    2,
-                )
+        elif self._is_typing_email:
+            await self._draw_email_input()
 
         # If validation fails, gracefully tell the user why
-        if error_message:
-            lines = error_message.split("\n")  # For multi-line error messages
-            for i, line in enumerate(lines):
-                render_text_centered(
-                    line,
-                    error_font,
-                    COLORS["DARK_RED"],
-                    SCREEN_WIDTH // 2,
-                    SCREEN_HEIGHT // 3 + 120 + i * 30,
-                )
+        if self._error_message:
+            await self._handle_validation_errors()
 
-        # Update display and yield
-        pygame.display.update()
-        await asyncio.sleep(0)
+    async def handle_event(self, event):
+        if event.type != pygame.KEYDOWN:
+            return
 
-        # Event loop
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    title_screen()
-                    return
-                if event.key == pygame.K_BACKSPACE:
-                    if is_typing_name and len(name) > 0:
-                        name = name[:-1]
-                    elif is_typing_email and len(email) > 0:
-                        email = email[:-1]
-                elif event.key == pygame.K_RETURN:
-                    if is_typing_name:
-                        if len(name) >= 4:
-                            is_typing_name = False
-                            is_typing_email = True
-                        else:
-                            error_message = "Name must be at least 4 characters."
-                    elif is_typing_email:
-                        if is_valid_email(email) and len(email) >= 6:
-                            leaderboard.add_player(email, name)
-                            await main_game(name, email)
-                            return
-                        else:
-                            error_message = "Please enter a valid email address."
+        if event.key == pygame.K_ESCAPE:
+            await TitleView().run()
+            return
+        if event.key == pygame.K_BACKSPACE:
+            if self._is_typing_name and len(self._name) > 0:
+                self._name = self._name[:-1]
+            elif self._is_typing_email and len(self._email) > 0:
+                self._email = self._email[:-1]
+        elif event.key == pygame.K_RETURN:
+            if self._is_typing_name:
+                if len(self._name) >= 4:
+                    self._is_typing_name = False
+                    self._is_typing_email = True
                 else:
-                    if event.unicode.isprintable():
-                        if is_typing_name and len(name) < 30:
-                            name += event.unicode
-                        if is_typing_email and len(email) < 50:
-                            email += event.unicode
+                    self._error_message = "Name must be at least 4 characters."
+            elif self._is_typing_email:
+                if self._is_valid_email(self._email) and len(self._email) >= 6:
+                    leaderboard.add_player(self._email, self._name)
+                    await main_game(self._name, self._email)
+                    return
+                else:
+                    self._error_message = "Please enter a valid email address."
+        else:
+            if event.unicode.isprintable():
+                if self._is_typing_name and len(self._name) < 30:
+                    self._name += event.unicode
+                if self._is_typing_email and len(self._email) < 50:
+                    self._email += event.unicode
 
-            await asyncio.sleep(0)
+    def _load_fonts(self):
+        self._input_font = pygame.font.Font(
+            resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.75)
+        )
+        self._error_font = pygame.font.Font(
+            resource("fonts/common.otf"), int(COMMON_FONT_SIZE * 0.6)
+        )
+
+    def _is_valid_email(self, email):
+        pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+        return re.match(pattern, email)
 
 
 # Main game loop
-async def main_game(name, email):
+async def main_game(name="", email=""):
     scores = []
     lives = LIVES
 
@@ -495,8 +527,11 @@ async def main_game(name, email):
     # Give the user three "lives", recording the scores for later, and displaying an
     # inter-round screen to summarize the "life"
     while lives > 0:
-        score, time_survived, cloud_points, max_speed = await play_game(lives)
-        await inter_round_screen(score, time_survived, cloud_points, max_speed)
+        # score, time_survived, cloud_points, max_speed = await play_game(lives)
+        session = await GameView(lives).run()
+        score, time_survived, cloud_points, max_speed = await session.get_results()
+
+        await InterRoundView(score, time_survived, cloud_points, max_speed).run()
         scores.append(score)
         lives -= 1
 
@@ -505,43 +540,49 @@ async def main_game(name, email):
     leaderboard.log_session(email, session_start, session_end, scores)
 
     # Display an end of game screen before returning to the title screen
-    await end_of_round_screen(scores, email)
+    await EndOfRoundView(scores, name, email).run()
 
 
-# Inter-round screen to display the score after each life
-async def inter_round_screen(score, time_survived, cloud_points, max_speed):
-    running = True
-    while running:
-        screen.fill(COLORS["SKY_BLUE"])
-        render_text_centered(
-            f"Score: {round(score)}",
+class InterRoundView(View):
+
+    def __init__(self, score, time_survived, cloud_points, max_speed):
+        super().__init__()
+        self._score = score
+        self._time_survived = time_survived
+        self._cloud_points = cloud_points
+        self._max_speed = max_speed
+
+    async def draw(self):
+        self.screen.fill(COLORS["SKY_BLUE"])
+        await self.render_text(
+            f"Score: {round(self._score)}",
             common_font,
             COLORS["BLACK"],
             SCREEN_WIDTH // 2,
             200,
         )
-        render_text_centered(
-            f"Time Alive: {round(time_survived)} seconds",
+        await self.render_text(
+            f"Time Alive: {round(self._time_survived)} seconds",
             common_font,
             COLORS["BLACK"],
             SCREEN_WIDTH // 2,
             300,
         )
-        render_text_centered(
-            f"Cloud Points: {round(cloud_points)}",
+        await self.render_text(
+            f"Cloud Points: {round(self._cloud_points)}",
             common_font,
             COLORS["BLACK"],
             SCREEN_WIDTH // 2,
             380,
         )
-        render_text_centered(
-            f"Max Speed: {round(max_speed)} ft/s",
+        await self.render_text(
+            f"Max Speed: {round(self._max_speed)} ft/s",
             common_font,
             COLORS["BLACK"],
             SCREEN_WIDTH // 2,
             460,
         )
-        render_text_centered(
+        await self.render_text(
             "Press ENTER or TOUCH to continue",
             common_font,
             COLORS["DARK_RED"],
@@ -551,75 +592,69 @@ async def inter_round_screen(score, time_survived, cloud_points, max_speed):
 
         display_brand_symbol()
 
-        pygame.display.update()
-        await asyncio.sleep(0)
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                running = False
-            if BROWSER and event.type == pygame.FINGERUP:
-                running = False
+    async def handle_event(self, event):
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+            await self.stop()
+        if BROWSER and event.type == pygame.FINGERUP:
+            await self.stop()
 
 
-# End of round screen with leaderboard, session scores, and high score image
-async def end_of_round_screen(scores, email):
-    running = True
-    best_score = max(scores)
-    blink_timer = 0
-    blink_on = True
-    BLINK_INTERVAL = 500
+class EndOfRoundView(View):
 
-    # Fetch the top 8 scores including the player's latest scores
-    top_scores = leaderboard.get_leaderboard(count=8)
+    def __init__(self, scores, name, email):
+        super().__init__()
+        self._scores = sorted(scores, reverse=True)
+        self._name = name
+        self._email = email
+        self._best_score = max(scores)
+        self._blink_timer = 0
+        self._blink_on = True
+        self._blink_interval = 500
+        self._fetch_leaderboard()
 
-    # Load the high score image
-    highscore_image = pygame.image.load("images/highscore.png").convert_alpha()
+        # Load the high score image
+        self._highscore_image = pygame.image.load(
+            "images/highscore.png"
+        ).convert_alpha()
 
-    # Main loop
-    while running:
-        # Blinking text
-        delta_time = clock.tick(60) / 1000
-        blink_timer += delta_time * 1000
-        if blink_timer >= BLINK_INTERVAL:
-            blink_timer = 0
-            blink_on = not blink_on
-
-        screen.fill(COLORS["SKY_BLUE"])
-
-        # Sort and display player's scores
-        sorted_scores = sorted(scores, reverse=True)
+    def _fetch_leaderboard(self):
+        # Fetch the top 8 scores including the player's latest scores
+        self._top_scores = leaderboard.get_leaderboard(count=8)
 
         # Check if player achieved the top position
-        player_is_top = False
-        if (
-            leaderboard.get_player_name(email) == top_scores[0][0]
-            and best_score == top_scores[0][1]
-        ):
-            player_is_top = True
+        self._player_is_top = leaderboard.is_high_score(self._best_score)
 
+    async def _update_blink(self):
+        self._delta_time = clock.tick(60) / 1000
+        self._blink_timer += self._delta_time * 1000
+        if self._blink_timer >= self._blink_interval:
+            self._blink_timer = 0
+            self._blink_on = not self._blink_on
+
+    async def _draw_header(self):
         # If the player is top, display the highscore.png image
-        if player_is_top:
-            highscore_rect = highscore_image.get_rect(center=(SCREEN_WIDTH // 2, 200))
-            screen.blit(highscore_image, highscore_rect)
+        if self._player_is_top:
+            highscore_rect = self._highscore_image.get_rect(
+                center=(SCREEN_WIDTH // 2, 200)
+            )
+            self.screen.blit(self._highscore_image, highscore_rect)
+
+        # Display "End of Round" if player is not the top scorer
         else:
-            # Display "End of Round" if player is not the top scorer
-            render_text_centered(
+            await self.render_text(
                 "End of Round", common_font, COLORS["BLACK"], SCREEN_WIDTH // 2, 200
             )
 
-        # Display player's individual scores
-        render_text_centered(
+    async def _draw_player_scores(self):
+        await self.render_text(
             "Your Scores:",
             common_font,
             COLORS["BLACK"],
             SCREEN_WIDTH // 2,
             300,
         )
-        for i, score in enumerate(sorted_scores):
-            render_text_centered(
+        for i, score in enumerate(self._scores):
+            await self.render_text(
                 f"Score {i + 1}: {round(score)}",
                 common_font,
                 COLORS["BLACK"],
@@ -627,13 +662,36 @@ async def end_of_round_screen(scores, email):
                 360 + i * 60,
             )
 
+    async def draw(self):
+        # Draw background
+        self.screen.fill(COLORS["SKY_BLUE"])
+
+        # Track blink timing
+        await self._update_blink()
+
+        # Draw header based upon top score
+        await self._draw_header()
+
+        # Draw player's individual scores for this session of play
+        await self._draw_player_scores()
+
+        # Draw the leaderboard, highlighting the players scores
+        await self._draw_leaderboard()
+
+        # Draw a summary of player's scores in this session
+        await self._draw_summary()
+
+        # Draw instructions for proceeding to the title screen
+        await self._draw_instructions()
+
+    async def _draw_leaderboard(self):
         # Create a semi-transparent black box for the leaderboard
         leaderboard_box = pygame.Surface(
             (LEADERBOARD_BOX_WIDTH, LEADERBOARD_BOX_HEIGHT)
         )
         leaderboard_box.set_alpha(LEADERBOARD_BOX_OPACITY)
         leaderboard_box.fill(COLORS["BLACK"])
-        screen.blit(
+        self.screen.blit(
             leaderboard_box,
             (
                 (SCREEN_WIDTH - LEADERBOARD_BOX_WIDTH) // 2,
@@ -643,7 +701,7 @@ async def end_of_round_screen(scores, email):
 
         # Draw title
         message = "Play at AWS re:Invent to win!" if BROWSER else "High Scores"
-        render_text_centered(
+        await self.render_text(
             message,
             leaderboard_title_font,
             COLORS["WHITE"],
@@ -656,10 +714,10 @@ async def end_of_round_screen(scores, email):
         line_height = 35
 
         # Display top scores, highlighting session scores in red with blinking effect
-        for i, (name, score, timestamp) in enumerate(top_scores):
+        for i, (name, score, _) in enumerate(self._top_scores):
             if not score:
                 text = small_common_font.render(name, True, COLORS["WHITE"])
-                screen.blit(text, (100, leaderboard_start_y + i * line_height))
+                self.screen.blit(text, (100, leaderboard_start_y + i * line_height))
                 continue
 
             rank = f"{i + 1}."
@@ -667,45 +725,45 @@ async def end_of_round_screen(scores, email):
             score_str = str(int(score)) if score else ""
 
             # Determine if this score is part of the current session
-            is_current_session = (name == leaderboard.get_player_name(email)) and (
-                score in scores
-            )
+            is_current_session = (name == self._name) and (score in self._scores)
 
             # Set the color and blinking for current session scores
-            if is_current_session and blink_on:
+            if is_current_session and self._blink_on:
                 color = COLORS["DARK_RED"]  # Blink the current session scores in red
             else:
                 color = COLORS["WHITE"]  # Normal scores are in white
 
             # Right-align rank numbers
             rank_text = small_common_font.render(rank, True, color)
-            screen.blit(rank_text, (100, leaderboard_start_y + i * line_height))
+            self.screen.blit(rank_text, (100, leaderboard_start_y + i * line_height))
 
             # Left-align player names
             name_text = small_common_font.render(player_name, True, color)
-            screen.blit(name_text, (160, leaderboard_start_y + i * line_height))
+            self.screen.blit(name_text, (160, leaderboard_start_y + i * line_height))
 
             # Left-align scores
             score_text = small_common_font.render(score_str, True, color)
-            screen.blit(score_text, (650, leaderboard_start_y + i * line_height))
+            self.screen.blit(score_text, (650, leaderboard_start_y + i * line_height))
 
+    async def _draw_summary(self):
         # Indicate the player's best score and ranking
         player_rank = None
-        for i, (name, score, timestamp) in enumerate(top_scores):
-            if name == leaderboard.get_player_name(email) and score == best_score:
+        for i, (name, score, _) in enumerate(self._top_scores):
+            if (name == self._name) and (score == self._best_score):
                 player_rank = i + 1
                 break
 
-        if player_rank and not player_is_top:
-            render_text_centered(
-                f"You are ranked {player_rank} with a score of {int(best_score)}",
+        if player_rank and not self._player_is_top:
+            await self.render_text(
+                f"You are ranked {player_rank} with a score of {int(self._best_score)}",
                 small_common_font,
                 COLORS["DARK_RED"],
                 SCREEN_WIDTH // 2,
                 SCREEN_HEIGHT - 120,
             )
 
-        render_text_centered(
+    async def _draw_instructions(self):
+        await self.render_text(
             "Press ENTER or TOUCH to restart",
             common_font,
             COLORS["BLACK"],
@@ -713,138 +771,136 @@ async def end_of_round_screen(scores, email):
             SCREEN_HEIGHT - 120,
         )
 
+        # TODO: Move this to the View class
         display_brand_symbol()
 
-        # Update display and yield
-        pygame.display.update()
-        await asyncio.sleep(0)
-
-        # Event loop
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                await title_screen()
-                return
-            if BROWSER and event.type == pygame.FINGERUP:
-                await title_screen()
-                return
+    async def handle_event(self, event):
+        if event.type == pygame.QUIT:
+            pygame.quit()
+            sys.exit()
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+            await TitleView().run()
+            return
+        if BROWSER and event.type == pygame.FINGERUP:
+            await TitleView().run()
+            return
 
 
-# Game logic for each "life" in a session
-async def play_game(lives):
-    # Track player, o
-    player = Player()
-    clouds = []
-    helicopters = []
-    total_cloud_points = 0
-    time_survived = 0
-    obstacle_speed = INITIAL_OBSTACLE_SPEED
-    running = True
-    max_speed = obstacle_speed
-    start_time = pygame.time.get_ticks()
+class GameView(View):
 
-    # Flags for tracking continuous touch steering
-    steer_left = False
-    steer_right = False
+    def __init__(self, lives):
+        super().__init__()
+        self._lives = lives
+        self._player = Player()
+        self._clouds = []
+        self._helicopters = []
+        self._total_cloud_points = 0
+        self._time_survived = 0
+        self._obstacle_speed = INITIAL_OBSTACLE_SPEED
+        self._max_speed = INITIAL_OBSTACLE_SPEED
+        self._start_time = pygame.time.get_ticks()
+        self._delta_time = clock.tick(60) / 1000
 
-    while running:
-        delta_time = clock.tick(60) / 1000
-        time_survived = (pygame.time.get_ticks() - start_time) / 1000
-        obstacle_speed += SPEED_INCREMENT * delta_time  # Increment speed gradually
-        max_speed = max(max_speed, obstacle_speed)
+        # Flags for tracking continuous touch steering
+        self._steer_left = False
+        self._steer_right = False
 
-        if time_survived > TIME_LIMIT:
-            score = (10 * time_survived) + total_cloud_points
-            return score, time_survived, total_cloud_points, max_speed
+    async def draw(self):
+        self._delta_time = clock.tick(60) / 1000
+        self._time_survived = (pygame.time.get_ticks() - self._start_time) / 1000
+        self._obstacle_speed += (
+            SPEED_INCREMENT * self._delta_time
+        )  # Increment speed gradually
+        self._max_speed = max(self._max_speed, self._obstacle_speed)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                sys.exit()
-
-            # Handle keyboard controls
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    steer_left = True
-                elif event.key == pygame.K_RIGHT:
-                    steer_right = True
-            elif event.type == pygame.KEYUP:
-                if event.key == pygame.K_LEFT:
-                    steer_left = False
-                elif event.key == pygame.K_RIGHT:
-                    steer_right = False
-
-            # Handle touch controls
-            elif event.type == pygame.FINGERDOWN:
-                # Check if the touch is on the left or right side of the screen
-                if event.x < 0.5:
-                    steer_left = True
-                    steer_right = False  # Prevent dual direction steering
-                else:
-                    steer_right = True
-                    steer_left = False  # Prevent dual direction steering
-            elif event.type == pygame.FINGERUP:
-                # Release steering when finger is lifted
-                steer_left = False
-                steer_right = False
+        if self._time_survived > TIME_LIMIT:
+            self._score = (10 * self._time_survived) + self._total_cloud_points
+            return
 
         # Move player based on steering flags
-        if steer_left:
-            player.handle_movement({pygame.K_LEFT: True})
-        elif steer_right:
-            player.handle_movement({pygame.K_RIGHT: True})
+        if self._steer_left:
+            self._player.handle_movement({pygame.K_LEFT: True})
+        elif self._steer_right:
+            self._player.handle_movement({pygame.K_RIGHT: True})
         else:
-            player.handle_movement({})  # No movement when no touch or key press
+            self._player.handle_movement({})  # No movement when no touch or key press
 
         # Spawn clouds and helicopters
         if random.random() < 0.02:
             cloud_type = random.randint(0, 2)
-            clouds.append(Cloud(cloud_type, obstacle_speed))
+            self._clouds.append(Cloud(cloud_type, self._obstacle_speed))
         if random.random() < 0.01:
-            helicopters.append(Helicopter(obstacle_speed))
+            self._helicopters.append(Helicopter(self._obstacle_speed))
 
         # Move and check collisions for clouds
-        for cloud in clouds[:]:
-            cloud.move(delta_time)
-            if player.rect.colliderect(cloud.rect):
-                total_cloud_points += cloud.point_value
-                clouds.remove(cloud)
+        for cloud in self._clouds[:]:
+            cloud.move(self._delta_time)
+            if self._player.rect.colliderect(cloud.rect):
+                self._total_cloud_points += cloud.point_value
+                self._clouds.remove(cloud)
 
         # Handle helicopter collisions
-        for helicopter in helicopters[:]:
-            helicopter.move(delta_time)
-            if player.rect.colliderect(helicopter.rect) and not helicopter.exploded:
-                score = (10 * time_survived) + total_cloud_points
-                return score, time_survived, total_cloud_points, max_speed
+        for helicopter in self._helicopters[:]:
+            helicopter.move(self._delta_time)
+            if (
+                self._player.rect.colliderect(helicopter.rect)
+                and not helicopter.exploded
+            ):
+                self._score = (10 * self._time_survived) + self._total_cloud_points
+                await self.stop()
+                return
 
-        handle_helicopter_collisions(helicopters)
+        handle_helicopter_collisions(self._helicopters)
 
         # Redraw screen
-        screen.fill(COLORS["SKY_BLUE"])
-        player.draw()
-        for cloud in clouds:
+        self.screen.fill(COLORS["SKY_BLUE"])
+        self._player.draw()
+        for cloud in self._clouds:
             cloud.draw()
-        for helicopter in helicopters:
+        for helicopter in self._helicopters:
             helicopter.draw()
 
         # Update the HUD and display lives
-        draw_hud(time_survived, total_cloud_points, obstacle_speed)
-        display_lives(lives)
+        draw_hud(self._time_survived, self._total_cloud_points, self._obstacle_speed)
+        display_lives(self._lives)
 
         # Show brand symbol (dynamic-o.png) in the bottom right
         display_brand_symbol()
 
-        pygame.display.update()
-        await asyncio.sleep(0)
+    async def handle_event(self, event):
+        # Handle keyboard controls
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_LEFT:
+                self._steer_left = True
+            elif event.key == pygame.K_RIGHT:
+                self._steer_right = True
+        elif event.type == pygame.KEYUP:
+            if event.key == pygame.K_LEFT:
+                self._steer_left = False
+            elif event.key == pygame.K_RIGHT:
+                self._steer_right = False
 
-    return (
-        round((10 * time_survived) + total_cloud_points),
-        round(time_survived),
-        round(total_cloud_points),
-        round(max_speed),
-    )
+        # Handle touch controls
+        elif event.type == pygame.FINGERDOWN:
+            # Check if the touch is on the left or right side of the screen
+            if event.x < 0.5:
+                self._steer_left = True
+                self._steer_right = False  # Prevent dual direction steering
+            else:
+                self._steer_right = True
+                self._steer_left = False  # Prevent dual direction steering
+        elif event.type == pygame.FINGERUP:
+            # Release steering when finger is lifted
+            self._steer_left = False
+            self._steer_right = False
+
+    async def get_results(self):
+        return (
+            round((10 * self._time_survived) + self._total_cloud_points),
+            round(self._time_survived),
+            round(self._total_cloud_points),
+            round(self._max_speed),
+        )
 
 
 # Handle helicopter collisions
@@ -909,7 +965,6 @@ class Player:
                 self.rotation_angle -= 1
             elif self.rotation_angle < 0:
                 self.rotation_angle += 1
-            self.rotation_angle = 0
 
     def handle_movement(self, keys):
         if keys.get(pygame.K_LEFT):
@@ -1019,4 +1074,4 @@ def display_lives(lives):
 
 
 if __name__ == "__main__":
-    asyncio.run(title_screen())
+    asyncio.run(TitleView().run())
