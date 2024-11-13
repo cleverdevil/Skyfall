@@ -95,6 +95,18 @@ def get_player_name(email):
     return None  # If the player doesn't exist
 
 
+# Function to check if a score is the top score
+def is_high_score(score):
+    conn = sqlite3.connect(DATABASE_FILE)
+    c = conn.cursor()
+
+    c.execute("select max(max(score1), max(score2), max(score3)) from sessions")
+
+    # Fetch the results
+    top_score = c.fetchone()[0]
+    return top_score and score == top_score
+
+
 # Function to get the top N scores across all sessions
 def get_leaderboard(count=10):
     conn = sqlite3.connect(DATABASE_FILE)
