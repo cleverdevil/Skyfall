@@ -9,7 +9,7 @@ from datetime import datetime
 import pygame
 
 # If running in browser as wasm, fake out the leaderboard
-BROWSER = True if sys.platform == "emscripten" else True
+BROWSER = True if sys.platform == "emscripten" else False
 if not BROWSER:
     import leaderboard
 
