@@ -9,36 +9,8 @@ from datetime import datetime
 import pygame
 
 # If running in browser as wasm, fake out the leaderboard
-BROWSER = True if sys.platform == "emscripten" else False
-
-if BROWSER:
-
-    class LeaderboardMock:
-        def is_high_score(self, score):
-            pass
-
-        def add_player(self, email, name):
-            pass
-
-        def log_session(self, email, session_start, session_end, scores):
-            pass
-
-        def get_player_name(self, email):
-            return ""
-
-        def get_leaderboard(self, count=10):
-            return [
-                ("Visit booth #1954 to compete!", None, None),
-                ("", None, None),
-                ("     Win A PS5 Pro     ", None, None),
-                ("", None, None),
-                ("", None, None),
-                ("", None, None),
-                ("See you there!", None, None),
-            ]
-
-    leaderboard = LeaderboardMock()
-else:
+BROWSER = True if sys.platform == "emscripten" else True
+if not BROWSER:
     import leaderboard
 
 
@@ -228,11 +200,12 @@ class SkyfallGame:
         scores = []
         lives = game.total_lives
 
-        # Check if the player exists, and register them if not
-        leaderboard.add_player(email, name)
+        if not BROWSER:
+            # Check if the player exists, and register them if not
+            leaderboard.add_player(email, name)
 
-        # Log the start of a new session
-        session_start = datetime.now()
+            # Log the start of a new session
+            session_start = datetime.now()
 
         # Give the user three "lives", recording the scores for later, and displaying
         # an end-of-life screen to summarize the "life"
@@ -244,9 +217,10 @@ class SkyfallGame:
             await self.show_end_of_life(score, time_survived, cloud_points, max_speed)
             lives -= 1
 
-        # Log the session at the end
-        session_end = datetime.now()
-        leaderboard.log_session(email, session_start, session_end, scores)
+        if not BROWSER:
+            # Log the session at the end
+            session_end = datetime.now()
+            leaderboard.log_session(email, session_start, session_end, scores)
 
         # Display an end of round screen before returning to the title screen
         await self.show_end_of_round(scores, name, email)
@@ -737,7 +711,9 @@ class EndOfRoundView(View):
         self._name = name
         self._email = email
         self._best_score = max(scores)
-        self._player_is_top = leaderboard.is_high_score(self._best_score)
+        self._player_is_top = (
+            None if BROWSER else leaderboard.is_high_score(self._best_score)
+        )
         self._leaderboard = Leaderboard(self._name, self._scores)
 
     async def _draw_header(self):
@@ -804,6 +780,9 @@ class EndOfRoundView(View):
         """
         Draw a quick summary of the player's session
         """
+
+        if BROWSER:
+            return
 
         # Indicate the player's best score and ranking
         top_scores = leaderboard.get_leaderboard(count=8)
@@ -1244,7 +1223,8 @@ class Leaderboard:
 
     box_opacity = 40
     box_width = game.screen_width - 100
-    box_height = 400
+    box_height = 240 if BROWSER else 400
+    box_y = 680 if BROWSER else game.screen_height - box_height - 250
 
     def __init__(self, name=None, scores=None):
         self._name = name
@@ -1280,21 +1260,30 @@ class Leaderboard:
         leaderboard_box.fill(game.colors.black)
         game.screen.blit(
             leaderboard_box,
-            (
-                (game.screen_width - self.box_width) // 2,
-                game.screen_height - self.box_height - 250,
-            ),
+            ((game.screen_width - self.box_width) // 2, self.box_y),
         )
 
+        # Draw a message instead of the leaderboard if running in the browser
+        message = "Win a Sony PS5 Pro!" if BROWSER else "High Scores"
+
         # Draw title
-        message = "Play at AWS re:Invent to win!" if BROWSER else "High Scores"
         await game.render_text(
             message,
             game.fonts.leaderboard_title,
             game.colors.white,
             game.screen_width // 2,
-            game.screen_height - self.box_height - 200,
+            self.box_y + 70,
         )
+
+        if BROWSER:
+            await game.render_text(
+                "\n".join([" Visit booth #1954", "Highest score wins!"]),
+                game.fonts.small_common,
+                game.colors.black,
+                game.screen_width // 2,
+                self.box_y + 170,
+            )
+            return
 
         # Define leaderboard positions
         leaderboard_start_y = game.screen_height - self.box_height - 160
