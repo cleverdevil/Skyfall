@@ -8,6 +8,9 @@ from datetime import datetime
 
 import pygame
 
+# Enable VSync for SDL renderer
+os.environ["SDL_RENDER_VSYNC"] = "1"
+
 # If running in browser as wasm, fake out the leaderboard
 BROWSER = True if sys.platform == "emscripten" else False
 if not BROWSER:
@@ -45,16 +48,61 @@ class SkyfallGame:
 
         pygame.init()
         pygame.font.init()
-        self.screen = pygame.display.set_mode(
+
+        # Create a base surface with the original game size and the true screen
+        self.screen = pygame.Surface((self.screen_width, self.screen_height))
+        self._screen = pygame.display.set_mode(
             (self.screen_width, self.screen_height),
-            flags=pygame.SCALED,
-            vsync=1,
+            pygame.DOUBLEBUF | pygame.SCALED | pygame.RESIZABLE,
         )
+
+        # Track window size
+        self.window_width = self.screen_width
+        self.window_height = self.screen_height
+
+        # Set title and complete initialization
         pygame.display.set_caption("Skyfall")
-        self.clock = pygame.time.Clock()
+
         self.fonts = self._load_fonts()
         self.images = self._load_images()
         self.colors = self._create_colors()
+
+        self.clock = pygame.time.Clock()
+        self.delta_time = self.clock.tick(60) / 1000
+
+    def handle_rescale(self, width, height):
+        self.window_width = max(width, self.screen_width - 400)
+        self.window_height = max(height, self.screen_height - 400)
+        pygame.display.set_mode(
+            (self.window_width, self.window_height), pygame.RESIZABLE
+        )
+
+    def calculate_scaled_size(self):
+        aspect_ratio = self.screen_width / self.screen_height
+        window_aspect_ratio = self.window_width / self.window_height
+
+        if window_aspect_ratio > aspect_ratio:
+            scaled_height = self.window_height
+            scaled_width = int(scaled_height * aspect_ratio)
+        else:
+            scaled_width = self.window_width
+            scaled_height = int(scaled_width / aspect_ratio)
+
+        return scaled_width, scaled_height
+
+    def update_display(self):
+        scaled_width, scaled_height = self.calculate_scaled_size()
+
+        scaled = pygame.transform.scale(self.screen, (scaled_width, scaled_height))
+
+        offset_x = (self.window_width - scaled_width) // 2
+        offset_y = (self.window_height - scaled_height) // 2
+
+        self._screen.fill(self.colors.black)
+        self._screen.blit(scaled, (offset_x, offset_y))
+
+        pygame.display.flip()
+        self.delta_time = self.clock.tick(60) / 1000
 
     #
     # Initialization methods
@@ -295,20 +343,21 @@ class View:
             # Call the subclass' `draw` method to paint the screen
             await self.draw()
 
-            # Tell pygame to update the display, and yield to other tasks
-            pygame.display.update()
-            await asyncio.sleep(0)
-
             # Handle events from pygame
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     sys.exit()
 
+                if event.type == pygame.VIDEORESIZE:
+                    game.handle_rescale(event.w, event.h)
+
                 await self.handle_event(event)
-                pygame.display.update()
-                game.clock.tick()
                 await asyncio.sleep(0)
+
+            # Tell pygame to update the display, and yield to other tasks
+            game.update_display()
+            await asyncio.sleep(0)
 
         return self
 
@@ -327,7 +376,6 @@ class TitleView(View):
         self._skydiver_direction = 1
         self._blink_timer = 0
         self._blink_interval = 3000
-        self._delta_time = game.clock.tick(60) / 1000
         self._background_clouds = []
         self._populate_clouds()
         self._leaderboard = Leaderboard()
@@ -409,7 +457,7 @@ class TitleView(View):
 
         # Animate skydiver position, reversing if needed
         move_speed = 5
-        self._skydiver_pos += move_speed * self._skydiver_direction * self._delta_time
+        self._skydiver_pos += move_speed * self._skydiver_direction * game.delta_time
 
         if self._skydiver_pos < (
             game.screen_width // 2 - self._max_skydiver_movement
@@ -423,7 +471,7 @@ class TitleView(View):
         Draw blinking text that tells the player how to start the game
         """
 
-        self._blink_timer += self._delta_time * 1000
+        self._blink_timer += game.delta_time * 1000
         if self._blink_timer >= self._blink_interval:
             self._blink_timer = 0
 
@@ -455,7 +503,7 @@ class TitleView(View):
 
         # Move and draw background clouds
         for cloud in self._background_clouds[:]:
-            cloud.move(self._delta_time)
+            cloud.move(game.delta_time)
             cloud.draw()
 
             # Remove cloud once it goes off-screen and add a new one
@@ -490,8 +538,7 @@ class SessionInfoView(View):
         Handle the blinking of the cursor in our input boxes
         """
 
-        self._delta_time = game.clock.tick(60) / 1000
-        self._blink_timer += self._delta_time * 1000
+        self._blink_timer += game.delta_time * 1000
         if self._blink_timer >= 500:
             self._blink_timer = 0
             self._cursor_visible = not self._cursor_visible
@@ -850,7 +897,6 @@ class GameView(View):
         self._obstacle_speed = 200
         self._max_speed = 200
         self._start_time = pygame.time.get_ticks()
-        self._delta_time = game.clock.tick(60) / 1000
 
         # Flags for tracking continuous touch steering
         self._steer_left = False
@@ -917,7 +963,7 @@ class GameView(View):
         """
 
         for cloud in self._clouds[:]:
-            cloud.move(self._delta_time)
+            cloud.move(game.delta_time)
             if self._player.rect.colliderect(cloud.rect):
                 self._total_cloud_points += cloud.point_value
                 self._clouds.remove(cloud)
@@ -934,7 +980,7 @@ class GameView(View):
                 await self.stop()
                 return
 
-            heli.move(self._delta_time)
+            heli.move(game.delta_time)
 
             if heli.exploded:
                 continue
@@ -969,11 +1015,10 @@ class GameView(View):
 
         speed_increment = 15
 
-        self._delta_time = game.clock.tick(60) / 1000
         self._time_survived = (pygame.time.get_ticks() - self._start_time) / 1000
 
         # Gradually increment speed
-        self._obstacle_speed += speed_increment * self._delta_time
+        self._obstacle_speed += speed_increment * game.delta_time
         self._max_speed = max(self._max_speed, self._obstacle_speed)
 
         # End the round if the player has exceeded the time limit
@@ -1179,6 +1224,7 @@ class Helicopter:
         self.rect = game.images.helicopter.get_rect()
         self.rect.x = random.randint(0, game.screen_width - self.rect.width)
         self.rect.y = game.screen_height
+        self.last_direction_change = 1000
         self.speed = speed
         self.horizontal_speed = random.uniform(40, 120)
         self.direction = random.choice([-1, 1])
@@ -1195,7 +1241,9 @@ class Helicopter:
             self.rect.y -= self.speed * delta_time
             self.rect.x += self.horizontal_speed * delta_time * self.direction
             if self.rect.left <= 0 or self.rect.right >= game.screen_width:
-                self.direction *= -1
+                if (pygame.time.get_ticks() - self.last_direction_change) > 1000:
+                    self.direction *= -1
+                    self.last_direction_change = pygame.time.get_ticks()
         else:
             self.rect.y -= 200 * delta_time
             self.opacity = max(0, self.opacity - 51 * delta_time)
@@ -1238,8 +1286,7 @@ class Leaderboard:
         Manage blinking for player scores on the leaderboard
         """
 
-        self._delta_time = game.clock.tick(60) / 1000
-        self._blink_timer += self._delta_time * 1000
+        self._blink_timer += game.delta_time * 1000
         if self._blink_timer >= self._blink_interval:
             self._blink_timer = 0
             self._blink_on = not self._blink_on
