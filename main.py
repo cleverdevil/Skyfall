@@ -858,7 +858,7 @@ class EndOfRoundView(View):
             game.fonts.common,
             game.colors.black,
             game.screen_width // 2,
-            game.screen_height - 120,
+            game.screen_height - 200,
         )
 
     async def handle_event(self, event):
@@ -951,10 +951,10 @@ class GameView(View):
         Add clouds and helicopters as needed, with random positions and speeds.
         """
 
-        if random.random() < 0.02:
+        if random.random() < 0.03:
             cloud_type = random.randint(0, 2)
             self._clouds.append(Cloud(cloud_type, self._obstacle_speed))
-        if random.random() < 0.01:
+        if random.random() < 0.015:
             self._helicopters.append(Helicopter(self._obstacle_speed))
 
     async def _handle_cloud_movement(self):
@@ -1319,7 +1319,7 @@ class Leaderboard:
             game.fonts.leaderboard_title,
             game.colors.white,
             game.screen_width // 2,
-            self.box_y + 70,
+            self.box_y + 50,
         )
 
         if BROWSER:
