@@ -954,7 +954,7 @@ class GameView(View):
         if random.random() < 0.03:
             cloud_type = random.randint(0, 2)
             self._clouds.append(Cloud(cloud_type, self._obstacle_speed))
-        if random.random() < min((0.001 * self._time_survived), 0.01):
+        if random.random() < min((0.002 * self._time_survived), 0.02):
             self._helicopters.append(Helicopter(self._obstacle_speed))
 
     async def _handle_cloud_movement(self):
@@ -975,7 +975,7 @@ class GameView(View):
         """
 
         for heli in self._helicopters:
-            if self._player.rect.colliderect(heli.rect) and not heli.exploded:
+            if self._player.hitbox.colliderect(heli.rect) and not heli.exploded:
                 self._score = (10 * self._time_survived) + self._total_cloud_points
                 await self.stop()
                 return
@@ -1118,6 +1118,15 @@ class Player:
         self.angle = 0
         self.max_angle = 15
         self.angle_delta = 0.6
+
+    @property
+    def hitbox(self):
+        return pygame.Rect(
+            self.rect.x + 10,
+            self.rect.y + 40,
+            self.rect.width - 20,
+            self.rect.height - 40,
+        )
 
     @property
     def max_speed(self):
