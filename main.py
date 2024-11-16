@@ -954,7 +954,7 @@ class GameView(View):
         if random.random() < 0.03:
             cloud_type = random.randint(0, 2)
             self._clouds.append(Cloud(cloud_type, self._obstacle_speed))
-        if random.random() < 0.015:
+        if random.random() < min((0.001 * self._time_survived), 0.01):
             self._helicopters.append(Helicopter(self._obstacle_speed))
 
     async def _handle_cloud_movement(self):
@@ -1100,57 +1100,109 @@ class GameView(View):
 class Player:
     """
     Represents the skydiver that the player is controlling. Supports movement and
-    "tilting" in the direction of movement.
+    "tilting" in the direction of movement, with acceleration and deceleration
+    for realistic steering. Movement speed increases over time.
     """
 
     def __init__(self):
+        self.start_time = pygame.time.get_ticks()
         self.image = pygame.transform.scale(game.images.player, (100, 91))
         self.rect = self.image.get_rect(
             center=(game.screen_width // 2, game.screen_height // 3)
         )
-        self.rotation_angle = 0
 
-    def move(self, dx):
+        self.move_speed = 0
+        self.base_max_speed = 10  # Initial max speed
+        self.base_move_delta = 0.2
+
+        self.angle = 0
+        self.max_angle = 15
+        self.angle_delta = 0.6
+
+    @property
+    def max_speed(self):
         """
-        Move the skydiver the specified number of pixels horizontally (left or right),
-        tilting the skydiver accordingly.
+        Dynamically calculate the max speed based on the elapsed game time.
         """
+        elapsed_time = (pygame.time.get_ticks() - self.start_time) // 1000
+        speed_increase = min(
+            elapsed_time // 10, 10
+        )  # Increase speed every 10 seconds, capped at +5
+        return self.base_max_speed + speed_increase
 
-        self.rect.x += dx
-        self.rect.x = max(0, min(game.screen_width - self.rect.width, self.rect.x))
+    @property
+    def move_delta(self):
+        """
+        Dynamically calculate the max move delta based on the elapsed game time.
+        """
+        elapsed_time = (pygame.time.get_ticks() - self.start_time) // 1000
 
-        # Update the rotation angle based on movement direction
-        if dx > 0:  # Moving right
-            if self.rotation_angle >= -15:
-                self.rotation_angle -= 1  # Tilt to the left (negative angle)
-        elif dx < 0:  # Moving left
-            if self.rotation_angle <= 15:
-                self.rotation_angle += 1
+        delta = self.base_move_delta + (0.025 * elapsed_time)
+        delta = min(delta, 5)
+
+        return delta
+
+    def move(self, direction):
+        """
+        Adjust the skydiver's velocity and angle based on the input direction,
+        respecting screen boundaries.
+        """
+        # Moving right
+        if direction > 0:
+            if self.rect.x < game.screen_width - self.rect.width:
+                self.move_speed = min(
+                    self.max_speed, self.move_speed + self.move_delta
+                )
+            self.angle = max(-self.max_angle, self.angle - self.angle_delta)
+
+        # Moving left
+        elif direction < 0:
+            if self.rect.x > 0:
+                self.move_speed = max(
+                    -self.max_speed, self.move_speed - self.move_delta
+                )
+            self.angle = min(self.max_angle, self.angle + self.angle_delta)
+
+        # No movement (deceleration)
         else:
-            if self.rotation_angle > 0:
-                self.rotation_angle -= 1
-            elif self.rotation_angle < 0:
-                self.rotation_angle += 1
+            if self.move_speed > 0:
+                self.move_speed = max(0, self.move_speed - self.move_delta)
+            elif self.move_speed < 0:
+                self.move_speed = min(0, self.move_speed + self.move_delta)
+
+            if self.angle > 0:
+                self.angle = max(0, self.angle - self.angle_delta)
+            elif self.angle < 0:
+                self.angle = min(0, self.angle + self.angle_delta)
+
+        # Update position based on the current velocity
+        self.rect.x += self.move_speed
+
+        # Clamp position within screen bounds
+        if self.rect.x <= 0:
+            self.rect.x = 0
+            self.move_speed = max(0, self.move_speed)  # Prevent leftward velocity
+        elif self.rect.x >= game.screen_width - self.rect.width:
+            self.rect.x = game.screen_width - self.rect.width
+            self.move_speed = min(0, self.move_speed)  # Prevent rightward velocity
 
     def handle_movement(self, keys):
         """
-        Map key presses to movement.
+        Map key presses to movement directions.
         """
-
         if keys.get(pygame.K_LEFT):
-            self.move(-5)
+            self.move(-1)
         elif keys.get(pygame.K_RIGHT):
-            self.move(5)
+            self.move(1)
         else:
-            self.move(0)  # No movement, keep the position and reset tilt
+            self.move(0)  # Gradually decelerate when no keys are pressed
 
     def draw(self):
         """
         Draw the player on the screen with the correct rotation.
         """
-
         # Rotate the image based on the current rotation angle
-        rotated_image = pygame.transform.rotate(self.image, self.rotation_angle)
+        rotated_image = pygame.transform.rotate(self.image, self.angle)
         rotated_rect = rotated_image.get_rect(center=self.rect.center)
         game.screen.blit(rotated_image, rotated_rect)
 
