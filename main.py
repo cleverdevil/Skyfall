@@ -15,6 +15,10 @@ os.environ["SDL_RENDER_VSYNC"] = "1"
 BROWSER = True if sys.platform == "emscripten" else False
 if not BROWSER:
     import leaderboard
+else:
+    import platform
+
+    platform.window.canvas.style.imageRendering = "pixelated"
 
 
 def resource(path):
@@ -40,8 +44,11 @@ class SkyfallGame:
     # Constants
     screen_width = 800
     screen_height = 1250
+    scaled_width = 800
+    scaled_height = 1250
     total_lives = 3
     time_limit = 300
+    fps = 60
 
     def __init__(self):
         self._monkeypatch_pygame()
@@ -56,6 +63,17 @@ class SkyfallGame:
             pygame.DOUBLEBUF | pygame.SCALED | pygame.RESIZABLE,
         )
 
+        # Restrict the events to process
+        pygame.event.set_allowed(
+            [
+                pygame.QUIT,
+                pygame.KEYDOWN,
+                pygame.KEYUP,
+                pygame.FINGERDOWN,
+                pygame.FINGERUP,
+            ]
+        )
+
         # Track window size
         self.window_width = self.screen_width
         self.window_height = self.screen_height
@@ -68,7 +86,7 @@ class SkyfallGame:
         self.colors = self._create_colors()
 
         self.clock = pygame.time.Clock()
-        self.delta_time = self.clock.tick(60) / 1000
+        self.delta_time = self.clock.tick(self.fps) / 1000
 
     def handle_rescale(self, width, height):
         self.window_width = max(width, self.screen_width - 400)
@@ -76,33 +94,32 @@ class SkyfallGame:
         pygame.display.set_mode(
             (self.window_width, self.window_height), pygame.RESIZABLE
         )
+        self.calculate_scaled_size()
 
     def calculate_scaled_size(self):
         aspect_ratio = self.screen_width / self.screen_height
         window_aspect_ratio = self.window_width / self.window_height
 
         if window_aspect_ratio > aspect_ratio:
-            scaled_height = self.window_height
-            scaled_width = int(scaled_height * aspect_ratio)
+            self.scaled_height = self.window_height
+            self.scaled_width = int(self.scaled_height * aspect_ratio)
         else:
-            scaled_width = self.window_width
-            scaled_height = int(scaled_width / aspect_ratio)
-
-        return scaled_width, scaled_height
+            self.scaled_width = self.window_width
+            self.scaled_height = int(self.scaled_width / aspect_ratio)
 
     def update_display(self):
-        scaled_width, scaled_height = self.calculate_scaled_size()
+        scaled = pygame.transform.scale(
+            self.screen, (self.scaled_width, self.scaled_height)
+        )
 
-        scaled = pygame.transform.scale(self.screen, (scaled_width, scaled_height))
-
-        offset_x = (self.window_width - scaled_width) // 2
-        offset_y = (self.window_height - scaled_height) // 2
+        offset_x = (self.window_width - self.scaled_width) // 2
+        offset_y = (self.window_height - self.scaled_height) // 2
 
         self._screen.fill(self.colors.black)
         self._screen.blit(scaled, (offset_x, offset_y))
 
         pygame.display.flip()
-        self.delta_time = self.clock.tick(60) / 1000
+        self.delta_time = self.clock.tick(self.fps) / 1000
 
     #
     # Initialization methods
@@ -339,21 +356,26 @@ class View:
         """
 
         self.running = True
+        frame_count = 0
         while self.running:
+            frame_count += 1
+
             # Call the subclass' `draw` method to paint the screen
             await self.draw()
 
             # Handle events from pygame
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit()
-                    sys.exit()
+            if frame_count % 2 == 0:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        pygame.quit()
+                        sys.exit()
 
-                if event.type == pygame.VIDEORESIZE:
-                    game.handle_rescale(event.w, event.h)
+                    if event.type == pygame.VIDEORESIZE:
+                        game.handle_rescale(event.w, event.h)
 
-                await self.handle_event(event)
-                await asyncio.sleep(0)
+                    await self.handle_event(event)
+
+                pygame.event.pump()
 
             # Tell pygame to update the display, and yield to other tasks
             game.update_display()
