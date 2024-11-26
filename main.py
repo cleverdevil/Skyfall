@@ -10,15 +10,30 @@ import pygame
 
 # Enable VSync for SDL renderer
 os.environ["SDL_RENDER_VSYNC"] = "1"
+os.environ["SDL_HINT_FRAMEBUFFER_ACCELERATION"] = "1"
+os.environ["SDL_HINT_VIDEO_HIGHDPI_DISABLED"] = "1"
+os.environ["SDL_HINT_TOUCH_MOUSE_EVENTS"] = "0"
 
 # If running in browser as wasm, fake out the leaderboard
 BROWSER = True if sys.platform == "emscripten" else False
 if not BROWSER:
     import leaderboard
+
+    os.environ["SDL_RENDER_DRIVER"] = "metal"
+    os.environ["SDL_HINT_RENDER_SCALE_QUALITY"] = "2"
+    os.environ["SDL_HINT_FRAMEBUFFER_ACCELERATION"] = "1"
+    os.environ["SDL_VIDEO_X11_NET_WM_BYPASS_COMPOSITOR"] = "1"
+    os.environ["SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS"] = "0"
 else:
     import platform
 
     platform.window.canvas.style.imageRendering = "pixelated"
+    os.environ["SDL_HINT_EMSCRIPTEN_ASYNCIFY"] = "1"
+    os.environ["SDL_HINT_EMSCRIPTEN_KEYBOARD_ELEMENT"] = "selector"
+    os.environ["SDL_RENDER_DRIVER"] = "opengles2"
+    os.environ["SDL_HINT_RENDER_SCALE_QUALITY"] = "1"
+    os.environ["SDL_HINT_FRAMEBUFFER_ACCELERATION"] = "1"
+    os.environ["SDL_HINT_RENDER_BATCHING"] = "1"
 
 
 def resource(path):
